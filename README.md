@@ -1,166 +1,149 @@
+<div align="center">
+
 # GAP-Control
 
-**Gap-Aware Advantage Projection for Controllable Text Generation.**
+### Cache Once, Compose Any — Amortized Compositional Controllable Decoding via a Shared-Rollout Advantage Cache
 
-> Controllable generation is amortized advantage prediction under a KL trust region.
-> 可控生成 = 在 KL 信任域约束下，对控制 reward 诱导的 token-level advantage residual 进行摊销预测。
+<img src="assets/pr.png" alt="GAP-Control overview" width="640">
 
-The KL-regularized optimal one-step logit intervention is the reward-induced token-level
-**advantage**:
+*One offline rollout pass caches every attribute's advantage. Any composition — seen, unseen, signed, or soft + hard — is then an exact linear combination, served by a single lightweight controller at about 1× base decoding cost.*
 
-```
-pi*(v | s_t, c) ∝ pi_0(v | s_t) · exp( A_c(s_t, v) / tau )
-l_t* = l_t^0 + A_c(s_t, ·) / tau
-```
+</div>
 
-GAP-Control trains a lightweight controller to **amortize** this advantage into a single
-residual prediction, and projects the residual into a **value-gap-dependent trust region**
-so it intervenes only as much as necessary. At inference there is no expert LM, no
-candidate-level rollout, no prefix scorer — just one base forward + one tiny controller
-forward per step.
+---
+
+## TL;DR
+
+Real controllable-generation requests are **compositions**: *"positive, formal, short, mentions ocean."* The space of such requests is combinatorial, and the interesting ones are mixtures that were **never trained or searched for**.
+
+- **Amortized steering** (e.g. LM-Steer) is cheap — one forward pass — but composes by *adding* separately trained vectors, which is not reward-optimal and **saturates** under composition.
+- **Inference-time search** (FUDGE, SMC, controlled decoding) is reward-grounded but **re-runs per target**, so its cost grows with the number of compositions.
+
+**GAP-Control** (*Gated Advantage Projection*) gets the reward-grounding of search at the single-pass cost of steering. The key observation: when the control reward is a linear mixture scored on **one shared rollout**, the base-policy token-level advantage is **exactly linear** in the mixture weights. So we cache every atomic advantage *once*, and every composition is a free linear combination at decode time.
+
+---
+
+## The key identity
+
+The KL-regularized optimal one-step intervention is the reward-induced token-level **advantage**:
+
+$$\pi^\star(v \mid s_t, c) \;\propto\; \pi_0(v \mid s_t)\,\exp\!\big(A_c(s_t,v)/\tau\big), \qquad \ell_t^\star = \ell_t^0 + A_c(s_t,\cdot)/\tau .$$
+
+When the reward is a linear mixture $R_c = \sum_i \alpha_i R_i$ evaluated on the **same** continuation, linearity of expectation gives the exact decomposition:
+
+$$A_c \;=\; \sum_i \alpha_i A_i , \qquad V_c^\star \;=\; \sum_i \alpha_i V_i^\star .$$
+
+A **single** shared-rollout pass per prefix therefore caches the per-attribute advantages $\{A_i\}$ of **all** attributes at once, and the optimal residual for **any** condition $c=\{(a_i,\alpha_i)\}$ — including signed $\alpha_i<0$ (suppression) and soft + hard mixtures — is a linear combination of the cache, with no further rollout, training, or search. We call this **cache once, compose any**.
+
+---
+
+## Method: three stages
+
+**1 · Cache once** *(offline)* — From each prefix, one shared rollout set scores *every* atomic attribute reward on the *same* continuations, yielding the advantage cache
+
+$$\hat A_i(s_t,v) = \hat Q_i(s_t,v) - \sum_{u\in S_t}\pi_0(u\mid s_t)\,\hat Q_i(s_t,u), \qquad \hat Q_i(s_t,v)=\tfrac1n\sum_{j} R_i(y^{(j)}).$$
+
+**2 · Compose any** *(free)* — For any requested mixture, the optimal residual is $A_c/\tau = \sum_i \alpha_i \hat A_i / \tau$ by the identity above. The same cache covers seen, unseen, signed, and soft + hard compositions.
+
+**3 · Amortize** *(online, one pass)* — A lightweight controller distills the cache, predicting a tied logit residual $b = W_{\mathrm{LM}}\,r_t$ and a value $\widehat V_t$ from the base hidden state and a control vector $v(c)=\sum_i \alpha_i e_i$. A **value-gap gate** sizes each step — intervene in proportion to how far the objective is from being met and how much head-room the base leaves:
+
+$$\rho_t = \big(\rho_{\min} + \rho_{\max}\,g_t\big)\,u_t^{\gamma}, \qquad g_t = \max\!\big(0,\,R_{\text{target}} - \widehat V_t\big), \qquad u_t = 1 - \max_v \pi_0(v\mid s_t).$$
+
+The controller supplies the direction, the gate the magnitude (centered, set-to-norm): $\;b_t = \rho_t\,\bar b / \lVert \bar b \rVert$. **Verifier-defined** attributes (length, keyword, structure) are met by a small separate overlay (EOS budget bias, satisfaction-gated marker push) — a few logit adds per step, no extra forward pass.
+
+Online cost: **one base forward + one tiny controller forward per token** ($\approx 1\times$ base).
+
+---
+
+## Results
+
+On **base** (non-instruction-tuned) LMs, where prompting fails, GAP-Control leads decoding-time control on single *and* compositional attributes. Falcon3-3B-Base, 116 held-out prompts (zero training overlap), 95% prompt-clustered bootstrap CIs:
+
+| Method | Rel. ↑ | Succ. ↑ | Seen pair | **Unseen pair** | **Unseen triple** | PPL ↓ | ×base |
+|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
+| base | 0.29 | 0.27 | 0.15 | 0.11 | 0.09 | 4.46 | 1.0× |
+| prompting | 0.42 | 0.40 | 0.35 | 0.32 | 0.24 | 6.08 | 1.0× |
+| PREADD | 0.50 | 0.49 | 0.40 | 0.29 | 0.26 | 4.23 | 3.0× |
+| FUDGE | 0.48 | 0.47 | 0.23 | 0.21 | 0.17 | 7.96 | 8.2× |
+| LM-Steer *(tuned, rank-256)* | 0.76 | 0.77 | 0.50 | 0.44 | 0.38 | 7.60 | 2.0× |
+| **GAP-Control** | **0.82** | **0.84** | **0.60** | **0.54** | **0.48** | 6.55 | **1.2×** |
+
+- **Breaks the saturation ceiling.** Tuned LM-Steer's compositional control *saturates* (strength-6 and strength-12 coincide at 0.44 / 0.38); GAP-Control exceeds it at *any* operating point — and at **lower** perplexity.
+- **The advantage widens with arity** (unseen pair → triple), exactly as the theory predicts: composition error is bounded by the per-atomic fit, not the number of co-active attributes.
+- **One controller, every attribute.** Per-attribute relevance averages **0.73** across seven soft classes (vs. LM-Steer 0.63, prompting 0.44, base 0.31), and the *same* controller does signed suppression zero-shot ($P(\text{positive})$: 0.06 → 0.82 as $\alpha: -1 \to +1$).
+- **Hard constraints** via the overlay: keyword **1.00**, length **0.98**, structure **0.89** (vs. prompting 0.47 / 0.63 / 0.32).
+
+<div align="center">
+<img src="assets/saturation.png" width="32%" alt="Control vs fluency: LM-Steer saturates, GAP-Control does not">
+<img src="assets/composition.png" width="32%" alt="Unseen pair and triple composition">
+<img src="assets/pareto.png" width="32%" alt="Control vs latency: cheap-and-controllable corner">
+</div>
+
+<div align="center"><sub>Left: static steering saturates while GAP-Control reaches control it cannot match, at lower PPL. Middle: more mass on satisfying all target attributes at once. Right: above inference-time search on control, ~7× faster.</sub></div>
+
+---
 
 ## Controlled attributes
 
-See **`ATTRIBUTES.md`** for the full taxonomy and rationale. Two reward classes under one
-residual mechanism:
+Two reward classes under one residual mechanism (see [`ATTRIBUTES.md`](ATTRIBUTES.md)):
 
-- **Soft** (classifier reward, supports continuous intensity): **sentiment** {positive,
-  negative, neutral}, **emotion** {joy, anger, sadness, fear}, **style** {formal, informal,
-  literary}. Built from synthetic+filtered data on a `bge-base-en-v1.5` head.
-- **Hard** (exact rule verifier, training-free): **length** {short/medium/long or target N},
-  **keyword** {required set}, **structure** {interrogative/exclamatory/enumeration/dialogue}.
+- **Soft** (classifier reward, continuous intensity): **sentiment** {positive, negative, neutral}, **emotion** {joy, anger, sadness, fear}, **style** {formal, informal, literary} — a `bge-base-en-v1.5` head trained on synthesized, judge-filtered text, then frozen.
+- **Hard** (exact rule verifier, training-free): **length** {short / medium / long / target N}, **keyword** {required set}, **structure** {interrogative / exclamatory / enumeration / dialogue}.
 
-A control condition is a list of components (`config.control`), so single-attribute,
-continuous-intensity, and multi-attribute composition are all the same code path. The reward
-is the mixture `R_c = Σ αᵢ Rᵢ − μ·R_conflict`.
+A control condition is a list of `(attribute, weight)` components, so single-attribute, continuous-intensity, signed, and multi-attribute composition are all one code path.
 
-## Layout
-
-```
-gap_control/            core library
-  config.py             Config (YAML); condition-driven control; resolves local model paths
-  env.py                .env loader + OpenAI-compatible client + local-model resolution
-  base_lm.py            frozen base LM: hidden h_t, logits l0_t, tied W_LM, generate
-  attributes.py         registry, ControlCondition, reward mixture R_c (soft+hard)
-  verifiers.py          hard attributes: length / keyword / structure (exact, offline)
-  classifiers.py        soft attributes: bge-base-en head + SoftClassifierBank
-  synth.py              LLM-API synthetic data generation + judge filtering
-  rewards.py            build_condition_reward(): wires classifiers/verifiers/judge to R_c
-  controller.py         ControlEncoder (attribute-slot mixture) + GapController (r_t, V_hat)
-  projection.py         center + L2 / KL gap projection (the trust region)
-  teacher.py            rollout teacher: Q -> centered advantage A, value target V*
-  decoding.py           GAP-Control decode + prompt-only / FUDGE-like baselines
-  metrics.py            control, KL, PPL, distinct-n, bias-advantage Spearman
-scripts/                pipeline CLIs (each runnable from repo root)
-configs/                sentiment_mvp · multiattr_demo · *_smoke (fast/offline tests)
-data/ models/ outputs/  artifacts (handbook §4.4 schema)
-```
+---
 
 ## Setup
 
 ```bash
-cp .env.example .env      # then fill GAPCTRL_API_KEY / BASE_URL / MODEL for synthesis
+cp .env.example .env      # fill GAPCTRL_API_KEY / BASE_URL / MODEL (synthesis & LLM-judge only)
+pip install torch transformers scikit-learn pyyaml numpy
 ```
 
-Local models are read from `GAPCTRL_MODELS_DIR` (default `/home/hanyu/models`): base LM
-`Qwen3-4B`, classifier backbone `bge-base-en-v1.5`. Runs are offline by default
-(`HF_HUB_OFFLINE=1`).
+Local models are read from `GAPCTRL_MODELS_DIR` (base LM, `bge-base-en-v1.5` backbone); runs are offline by default (`HF_HUB_OFFLINE=1`). The API is needed **only** to synthesize classifier data and run the LLM-judge — decoding and evaluation are fully local.
 
-## Baselines (handbook §3.4)
-
-All decoding-time, base-only (no extra trained LM), modern, and fair — same base model and
-sampler for every method:
-
-| method | family | control signal |
-|--------|--------|----------------|
-| `prompt` | prompting | none (plain) |
-| `instruct` | prompting | natural-language attribute instruction in context |
-| `cfg` | contrastive decoding | classifier-free guidance: `l_uncond + γ(l_cond − l_uncond)` |
-| `preadd` | expert/anti-expert (DExperts family) | contrastive prompts: `l_base + α(l_pos − l_neg)` |
-| `fudge` | discriminator-guided | reward as a future predictor over top-k (inference-time) |
-| `bon` | test-time sampling | best-of-N reranked by the reward |
-| `gap` | **ours** | amortized advantage residual + gap projection |
-
-`cfg`/`preadd`/`instruct` need no reward at inference; `fudge`/`bon` use the reward at
-inference (the slow, inference-time-control points on the efficiency curve).
-
-## Compositional control (arbitrary attributes, unseen combinations)
-
-Handles any number of attributes (many soft, many hard, mixed) and generalizes to
-combinations never trained on. Key fact: the advantage is **exactly linear** in the reward
-mixture (`A_c = Σαᵢ Aᵢ`), so we
-
-1. **cache per-attribute advantages from one shared rollout set** per prefix
-   (`scripts/estimate_teacher_multi.py`) — every atomic's verifier/classifier scored on the
-   same completions; any composition's target is then a linear combination (cheap + exact);
-2. train on **randomly sampled compositions** with a controller that is **additive +
-   interaction** (`CompositionalController`): a structurally-linear pathway that *provably
-   composes* to unseen combos, plus a small regularized interaction residual for conflicts;
-3. **hold out** combinations and measure generalization (`config.holdout_combos`).
-
-Verified: on a held-out combo the controller composes as `cos(r_combo, mean-of-singles)=1.000`
-with a 0.8% interaction term — exact additive generalization by construction.
+## Quickstart
 
 ```bash
-python scripts/estimate_teacher_multi.py --config configs/compositional_demo.yaml
-python scripts/train_compositional.py     --config configs/compositional_demo.yaml
-python scripts/decode_gap_control.py      --config configs/compositional_demo.yaml --methods gap,prompt,cfg,preadd
-```
-
-## Multi-model synthesis (role separation)
-
-So no model grades its own output (`.env`):
-`GAPCTRL_GEN_MODELS` (rotated generators) → `GAPCTRL_FILTER_MODEL` (data QA, distinct) →
-`GAPCTRL_JUDGE_MODEL` (reward/eval, distinct again). Seeds are a balanced
-genre×topic×length×register grid (`seeds.py`) so each class spans many genres/registers.
-
-## Building soft-attribute classifiers (needs the API)
-
-```bash
-python scripts/synth_data.py --dims sentiment,emotion,style --per-class 300   # generate+filter
-python scripts/train_classifier.py --dim sentiment   # bge head; reports acc + ECE
-python scripts/train_classifier.py --dim emotion
-python scripts/train_classifier.py --dim style
-```
-
-Without trained classifiers, soft dims auto-fall back to an offline LLM judge. Hard dims need
-nothing — try them offline now: `bash scripts/run_mvp.sh configs/structure_smoke.yaml`.
-
-## Pipeline (handbook §4.1, the 7 steps)
-
-```bash
-# fast smoke test of the whole thing (a few minutes on a 3090)
+# fast end-to-end smoke test
 bash scripts/run_mvp.sh configs/sentiment_smoke.yaml
 
-# the real MVP run
-bash scripts/run_mvp.sh configs/sentiment_mvp.yaml
+# compositional control (cache → train → decode), with baselines
+python scripts/estimate_teacher_multi.py --config configs/compositional_demo.yaml   # 1. shared-rollout cache
+python scripts/train_compositional.py    --config configs/compositional_demo.yaml   # 2. distill controller
+python scripts/decode_gap_control.py     --config configs/compositional_demo.yaml \
+       --methods gap,prompt,preadd,fudge                                            # 3. decode + baselines
+python scripts/evaluate.py               --config configs/compositional_demo.yaml   # 4. metrics table
 ```
 
-Or stage by stage:
+## Repository layout
 
-```bash
-python scripts/build_prefixes.py            --config configs/sentiment_mvp.yaml  # 1. prefixes
-python scripts/estimate_teacher_advantage.py --config configs/sentiment_mvp.yaml # 2. teacher A
-python scripts/train_controller.py          --config configs/sentiment_mvp.yaml  # 3. train
-python scripts/decode_gap_control.py        --config configs/sentiment_mvp.yaml --methods gap,prompt,fudge  # 4. decode
-python scripts/evaluate.py                  --config configs/sentiment_mvp.yaml  # 5. main table
+```
+gap_control/         core library
+  attributes.py        registry, ControlCondition, reward mixture R_c (soft + hard)
+  teacher.py           shared-rollout teacher: Q → centered advantage A, value target V*
+  controller.py        control encoder (attribute-slot mixture) + gated controller (r_t, V̂)
+  projection.py        center + value-gap gate (the magnitude budget)
+  decoding.py          GAP-Control decode + prompting / FUDGE / best-of-N baselines
+  classifiers.py       soft attributes: bge head + classifier bank
+  verifiers.py         hard attributes: length / keyword / structure (exact, offline)
+  rewards.py           wires classifiers / verifiers / judge into R_c
+  synth.py judge.py    LLM-API synthetic data generation + judge filtering
+  base_lm.py metrics.py config.py env.py
+scripts/             pipeline CLIs (cache · train · decode · evaluate · synth)
+configs/             experiment configs
+data/                small canonical inputs (prompts, rewards); large rollouts gitignored
 ```
 
-## What to look at (MVP pass criteria, handbook §4.2)
+## Citation
 
-1. **Teacher has signal** — `estimate_teacher_advantage` prints `A std`; should be > 0.
-2. **Controller learns advantage** — `train_controller` prints **bias-advantage Spearman**;
-   target **> 0.3**. This is the core "did it amortize the advantage" check.
-3. **Control + low perturbation** — `evaluate` table: GAP-Control reward/success above
-   prompt-only, ideally at lower KL / similar PPL; faster than FUDGE-like (ms/token).
-4. **Gap projection matters** — set `projection: none` and confirm KL/PPL get worse.
-
-## Notes
-
-- Reward backend falls back to an offline LLM-judge (cached `Qwen2.5-0.5B-Instruct`) if the
-  HF sentiment classifier can't be downloaded.
-- The controller checkpoint is tiny: it reuses the **frozen base LM head** `W_LM`, so the
-  residual lives in the base model's output space (low-perturbation by construction).
-- Next milestones (handbook §4.3): MVP-1 value teacher + efficiency; Full-1 continuous
-  intensity (`alpha` sweep); Full-2 held-out multi-attribute composition.
+```bibtex
+@inproceedings{gapcontrol,
+  title     = {Cache Once, Compose Any: Amortized Compositional Controllable
+               Decoding via a Shared-Rollout Advantage Cache},
+  author    = {Anonymous},
+  booktitle = {Proceedings of the AAAI Conference on Artificial Intelligence},
+  year      = {2027}
+}
 ```
