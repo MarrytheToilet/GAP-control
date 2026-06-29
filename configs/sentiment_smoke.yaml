@@ -1,0 +1,55 @@
+# Fast offline smoke test: sentiment via the LLM-judge reward (no trained classifier).
+task: sentiment_smoke
+
+control:
+  - {dim: sentiment, value: positive, alpha: 1.0}
+aggregate: mean
+conflict_mu: 0.0
+
+base_model: Qwen/Qwen2.5-0.5B-Instruct
+backbone: bge-base-en-v1.5
+classifier_dir: models/classifier
+language: en
+device: cuda
+dtype: float16
+
+soft_reward_backend: llm_judge
+reward_judge_model: Qwen/Qwen2.5-0.5B-Instruct
+
+num_prompts: 4
+prefixes_per_prompt: 3
+prefix_min_len: 3
+prefix_max_len: 12
+prefix_gen_max_new: 15
+
+teacher: rollout
+topk: 16
+rollout_samples: 2
+rollout_max_new: 12
+rollout_temperature: 1.0
+rollout_batch_size: 64
+
+control_dim: 64
+fuse_hidden: 256
+controller_dropout: 0.1
+
+tau: 1.0
+value_lambda: 1.0
+lr: 1.0e-4
+epochs: 10
+batch_size: 16
+grad_clip: 1.0
+val_frac: 0.2
+seed: 0
+
+projection: l2
+rho_min: 0.0
+rho_max: 2.0
+reward_target: 1.0
+kl_budget_max: 1.0
+
+gen_max_new: 20
+gen_top_p: 0.9
+gen_temperature: 0.7
+decode_topk: 16
+samples_per_prompt: 1

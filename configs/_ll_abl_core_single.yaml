@@ -1,0 +1,84 @@
+task: llm_multi
+control:
+- dim: sentiment
+  value: positive
+  alpha: 1.0
+aggregate: mean
+conflict_mu: 0.0
+compositional: true
+atomics:
+- dim: sentiment
+  value: positive
+- dim: sentiment
+  value: negative
+- dim: sentiment
+  value: neutral
+- dim: style
+  value: formal
+- dim: style
+  value: informal
+- dim: style
+  value: literary
+- dim: emotion
+  value: joy
+- dim: emotion
+  value: anger
+- dim: emotion
+  value: sadness
+- dim: emotion
+  value: fear
+max_attrs: 3
+compositions_per_prefix: 16
+interaction_lambda: 0.1
+holdout_combos:
+- - sentiment:positive
+  - style:formal
+- - emotion:joy
+  - style:literary
+base_model: Llama-3.2-3B
+backbone: bge-base-en-v1.5
+classifier_dir: models/classifier
+language: en
+device: cuda
+dtype: float16
+soft_reward_backend: classifier
+reward_judge_model: Qwen/Qwen2.5-0.5B-Instruct
+num_prompts: 120
+prefixes_per_prompt: 2
+prefix_min_len: 3
+prefix_max_len: 10
+prefix_gen_max_new: 12
+teacher: rollout
+topk: 32
+rollout_samples: 12
+rollout_max_new: 40
+rollout_temperature: 1.0
+rollout_batch_size: 128
+control_dim: 64
+fuse_hidden: 1024
+controller_dropout: 0.0
+tau: 0.1
+value_lambda: 1.0
+lr: 0.0002
+epochs: 40
+batch_size: 64
+grad_clip: 1.0
+val_frac: 0.1
+seed: 0
+projection: l2
+rho_min: 50.0
+rho_max: 50.0
+reward_target: 1.0
+kl_budget_max: 1.0
+lexical_strength: 8.0
+gen_max_new: 32
+gen_top_p: 0.9
+gen_temperature: 0.7
+decode_topk: 32
+samples_per_prompt: 6
+adv_weight: true
+use_steering: false
+mid_layer_frac: 0.0
+decode_strength: 2.0
+linear_steer_rank: 0
+interaction: false

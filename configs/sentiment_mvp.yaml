@@ -1,0 +1,57 @@
+# GAP-Control MVP-0: single-attribute sentiment (handbook 4.1)
+# Soft attribute -> needs a trained classifier (scripts/synth_data.py + train_classifier.py),
+# else falls back to the offline LLM judge.
+task: sentiment
+
+control:
+  - {dim: sentiment, value: positive, alpha: 1.0}
+aggregate: mean
+conflict_mu: 0.0
+
+base_model: Qwen3-4B            # resolved against GAPCTRL_MODELS_DIR (/home/hanyu/models)
+backbone: bge-base-en-v1.5
+classifier_dir: models/classifier
+language: en
+device: cuda
+dtype: float16
+
+soft_reward_backend: classifier   # classifier | llm_judge (auto-falls back if untrained)
+reward_judge_model: Qwen/Qwen2.5-0.5B-Instruct
+
+num_prompts: 20
+prefixes_per_prompt: 8
+prefix_min_len: 3
+prefix_max_len: 25
+prefix_gen_max_new: 30
+
+teacher: rollout
+topk: 50
+rollout_samples: 4
+rollout_max_new: 20
+rollout_temperature: 1.0
+rollout_batch_size: 256
+
+control_dim: 64
+fuse_hidden: 512
+controller_dropout: 0.1
+
+tau: 1.0
+value_lambda: 1.0
+lr: 1.0e-4
+epochs: 20
+batch_size: 64
+grad_clip: 1.0
+val_frac: 0.1
+seed: 0
+
+projection: l2
+rho_min: 0.0
+rho_max: 2.0
+reward_target: 1.0
+kl_budget_max: 1.0
+
+gen_max_new: 40
+gen_top_p: 0.9
+gen_temperature: 0.7
+decode_topk: 50
+samples_per_prompt: 1
