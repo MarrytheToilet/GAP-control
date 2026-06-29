@@ -53,6 +53,11 @@ The controller supplies the direction, the gate the magnitude (centered, set-to-
 
 Online cost: **one base forward + one tiny controller forward per token** ($\approx 1\times$ base).
 
+<div align="center">
+<img src="assets/gate.png" width="66%" alt="Value-gap gate validation">
+<br><sub>The gate is adaptive, not a constant knob: the predicted value tracks final attribute relevance (left), and the intervention norm shrinks ~53% over decoding as the value gap closes (right).</sub>
+</div>
+
 ---
 
 ## Results
@@ -74,12 +79,22 @@ On **base** (non-instruction-tuned) LMs, where prompting fails, GAP-Control lead
 - **Hard constraints** via the overlay: keyword **1.00**, length **0.98**, structure **0.89** (vs. prompting 0.47 / 0.63 / 0.32).
 
 <div align="center">
-<img src="assets/saturation.png" width="32%" alt="Control vs fluency: LM-Steer saturates, GAP-Control does not">
-<img src="assets/composition.png" width="32%" alt="Unseen pair and triple composition">
-<img src="assets/pareto.png" width="32%" alt="Control vs latency: cheap-and-controllable corner">
+<img src="assets/saturation.png" width="49%" alt="Control vs fluency: LM-Steer saturates, GAP-Control does not">
+<img src="assets/composition.png" width="49%" alt="Unseen pair and triple composition">
+<br><sub>Left: static steering <b>saturates</b> while GAP-Control reaches control it cannot match at any strength, and at lower PPL. Right: GAP-Control puts the most probability mass on satisfying <b>all</b> target attributes of an unseen pair / triple at once.</sub>
 </div>
 
-<div align="center"><sub>Left: static steering saturates while GAP-Control reaches control it cannot match, at lower PPL. Middle: more mass on satisfying all target attributes at once. Right: above inference-time search on control, ~7× faster.</sub></div>
+<div align="center">
+<img src="assets/signed.png" width="53%" alt="Signed control sweep and control-perturbation frontier">
+<img src="assets/pareto.png" width="38%" alt="Control vs latency: cheap-and-controllable corner">
+<br><sub>Left: one controller spans <b>signed</b> control zero-shot — suppression ($\alpha=-1$) to amplification ($\alpha=+1$). Right: GAP-Control sits in the cheap-and-controllable corner — above inference-time search (FUDGE) on control, ~7× faster.</sub>
+</div>
+
+<div align="center">
+<img src="assets/specificity.png" width="42%" alt="Control specificity heatmap">
+<img src="assets/controlplane.png" width="42%" alt="Two-coefficient control plane">
+<br><sub>Left: control is <b>specific</b> — targeting an attribute (row) raises that attribute most (diagonal), with leakage only between correlated attributes. Right: the two-coefficient control plane is a smooth, navigable knob — joint success rises as either weight increases.</sub>
+</div>
 
 ---
 
