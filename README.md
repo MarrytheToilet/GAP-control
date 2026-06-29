@@ -158,7 +158,6 @@ data/                small canonical inputs (prompts, rewards); large rollouts g
   title     = {Cache Once, Compose Any: Amortized Compositional Controllable
                Decoding via a Shared-Rollout Advantage Cache},
   author    = {Anonymous},
-  booktitle = {Proceedings of the AAAI Conference on Artificial Intelligence},
   year      = {2027}
 }
 ```
