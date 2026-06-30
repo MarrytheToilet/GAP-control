@@ -39,6 +39,11 @@ A **single** shared-rollout pass per prefix therefore caches the per-attribute a
 
 ## Method: three stages
 
+<div align="center">
+<img src="assets/framework.png" width="100%" alt="GAP-Control architecture: cache once, compose any, amortize">
+<br><sub>The three stages in detail. <b>(1) Cache once</b>: one shared rollout per prefix scores every atomic reward on the same continuations → per-attribute advantage cache. <b>(2) Compose any</b>: any signed/scaled mixture is the exact linear combination $A_c=\sum_i\alpha_i A_i$. <b>(3) Amortize</b>: a single-pass controller emits the residual, the value-gap gate sizes it, and a hard-constraint overlay handles verifier-defined attributes.</sub>
+</div>
+
 **1 · Cache once** *(offline)* — From each prefix, one shared rollout set scores *every* atomic attribute reward on the *same* continuations, yielding the advantage cache
 
 $$\hat A_i(s_t,v) = \hat Q_i(s_t,v) - \sum_{u\in S_t}\pi_0(u\mid s_t)\,\hat Q_i(s_t,u), \qquad \hat Q_i(s_t,v)=\tfrac1n\sum_{j} R_i(y^{(j)}).$$
