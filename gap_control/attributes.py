@@ -21,7 +21,7 @@ import torch
 from . import verifiers
 
 
-# ----------------------- canonical taxonomy (see ATTRIBUTES.md) -----------------------
+# ----------------------- canonical taxonomy -----------------------
 SOFT_DIMS = {
     "sentiment": ["positive", "negative", "neutral"],
     "emotion": ["joy", "anger", "sadness", "fear"],

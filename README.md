@@ -105,7 +105,7 @@ On **base** (non-instruction-tuned) LMs, where prompting fails, GAP-Control lead
 
 ## Controlled attributes
 
-Two reward classes under one residual mechanism (see [`ATTRIBUTES.md`](ATTRIBUTES.md)):
+Two reward classes under one residual mechanism:
 
 - **Soft** (classifier reward, continuous intensity): **sentiment** {positive, negative, neutral}, **emotion** {joy, anger, sadness, fear}, **style** {formal, informal, literary} — a `bge-base-en-v1.5` head trained on synthesized, judge-filtered text, then frozen.
 - **Hard** (exact rule verifier, training-free): **length** {short / medium / long / target N}, **keyword** {required set}, **structure** {interrogative / exclamatory / enumeration / dialogue}.
