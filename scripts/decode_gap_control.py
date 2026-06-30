@@ -75,7 +75,7 @@ def main():
     anti = A.describe_anti(condition)
 
     reward_fn = None
-    if {"fudge", "bon"} & set(methods):
+    if {"fudge", "bon", "cd"} & set(methods):
         reward_fn, _, _ = build_condition_reward(cfg, tokenizer=base.tokenizer)
 
     out_path = args.out or f"{cfg.out_dir}/{cfg.task}_decode.jsonl"
@@ -102,6 +102,8 @@ def main():
                         out = decoding.preadd_decode(base, ptext, instruction, anti, cfg=cfg)
                     elif m == "bon":
                         out = decoding.best_of_n_decode(base, reward_fn, pid, cfg=cfg)
+                    elif m == "cd":
+                        out = decoding.controlled_decode(base, reward_fn, pid, cfg=cfg)
                     else:
                         raise ValueError(f"unknown method {m}")
                     rec = {"method": m, "prompt_id": p["prompt_id"],

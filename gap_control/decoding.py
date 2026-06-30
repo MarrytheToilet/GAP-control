@@ -306,6 +306,42 @@ def best_of_n_decode(base: BaseLM, reward_fn, prompt_ids: List[int], *, cfg, n: 
 
 
 @torch.no_grad()
+def controlled_decode(base: BaseLM, reward_fn, prompt_ids: List[int], *, cfg,
+                      n_cand: int = 8, block_len: int = 8) -> dict:
+    """Blockwise controlled decoding (Mudgal et al. 2024). At each block, sample n_cand
+    candidate blocks of block_len tokens and keep the one with the highest VALUE, where
+    the value is a one-sample Monte-Carlo estimate of the expected final reward: each
+    candidate is rolled out to completion once and the COMPLETED text is scored. This
+    follows the CD algorithm (block-level value-guided selection) with an MC critic;
+    crucially it scores completed continuations, not partial text."""
+    device = base.device
+    gen_ids: List[int] = []
+    t0 = time.time()
+    while len(gen_ids) < cfg.gen_max_new:
+        bl = min(block_len, cfg.gen_max_new - len(gen_ids))
+        prefix = prompt_ids + gen_ids
+        # 1) propose n_cand candidate blocks
+        blocks = base.generate(torch.tensor([prefix] * n_cand, device=device),
+                               max_new_tokens=bl, do_sample=True,
+                               top_p=cfg.gen_top_p, temperature=cfg.gen_temperature)[:, len(prefix):]
+        # 2) Monte-Carlo value: roll each candidate to completion, score the COMPLETED text
+        remaining = cfg.gen_max_new - len(gen_ids) - bl
+        cand_prefix = torch.cat([torch.tensor([prefix] * n_cand, device=device), blocks], dim=1)
+        if remaining > 0:
+            full = base.generate(cand_prefix, max_new_tokens=remaining, do_sample=True,
+                                 top_p=cfg.gen_top_p, temperature=cfg.gen_temperature)
+        else:
+            full = cand_prefix
+        gen_part = full[:, len(prompt_ids):]                            # generated continuation per candidate
+        scores = reward_fn([base.decode(row) for row in gen_part])      # MC value of each candidate block
+        gen_ids = gen_ids + blocks[int(scores.argmax())].tolist()
+    elapsed = time.time() - t0
+    out = _finish(base, prompt_ids + gen_ids, len(prompt_ids), elapsed)
+    out["ms_per_token"] = 1000.0 * elapsed / max(n_cand * cfg.gen_max_new, 1)  # amortized over candidates
+    return out
+
+
+@torch.no_grad()
 def prompt_only_decode(base: BaseLM, prompt_ids: List[int], *, cfg) -> dict:
     t0 = time.time()
     ids = _cached_sample(base, list(prompt_ids), cfg)
@@ -314,13 +350,18 @@ def prompt_only_decode(base: BaseLM, prompt_ids: List[int], *, cfg) -> dict:
 
 @torch.no_grad()
 def fudge_like_decode(base: BaseLM, reward_fn, prompt_ids: List[int], *,
-                      cfg, lam: float = 4.0, fudge_topk: int = 20,
-                      fudge_samples: int = 1, fudge_lookahead: int = 6) -> dict:
+                      cfg, lam: float = None, fudge_topk: int = None,
+                      fudge_samples: int = None, fudge_lookahead: int = None) -> dict:
     """FUDGE-style baseline: reweight top-k candidates by an inference-time future
     predictor (here the reward applied to a short lookahead rollout). Speed: the
     expensive candidate-scoring runs only every ``cfg.fudge_interval`` tokens
-    (plain sampling in between) -- a ~interval x speedup for the slow discriminator."""
+    (plain sampling in between) -- a ~interval x speedup for the slow discriminator.
+    Strength knobs are cfg-tunable: fudge_lam, fudge_topk, fudge_lookahead, fudge_samples."""
     device = base.device
+    lam = getattr(cfg, "fudge_lam", 4.0) if lam is None else lam
+    fudge_topk = getattr(cfg, "fudge_topk", 20) if fudge_topk is None else fudge_topk
+    fudge_lookahead = getattr(cfg, "fudge_lookahead", 6) if fudge_lookahead is None else fudge_lookahead
+    fudge_samples = getattr(cfg, "fudge_samples", 1) if fudge_samples is None else fudge_samples
     interval = max(1, int(getattr(cfg, "fudge_interval", 1)))
     ids = list(prompt_ids)
     t0 = time.time()
@@ -343,15 +384,17 @@ def fudge_like_decode(base: BaseLM, reward_fn, prompt_ids: List[int], *,
         cand = [ids + [v.item()] for v in top_ids]
         maxlen = len(ids) + 1
         pad = base.tokenizer.pad_token_id
-        batch = torch.full((K, maxlen), pad, device=device, dtype=torch.long)
-        attn = torch.zeros((K, maxlen), device=device, dtype=torch.long)
-        for i, seq in enumerate(cand):
+        S = max(1, int(fudge_samples))
+        rep = cand * S                                               # K*S rows (sample-major)
+        batch = torch.full((K * S, maxlen), pad, device=device, dtype=torch.long)
+        attn = torch.zeros((K * S, maxlen), device=device, dtype=torch.long)
+        for i, seq in enumerate(rep):
             batch[i, maxlen - len(seq):] = torch.tensor(seq, device=device)
             attn[i, maxlen - len(seq):] = 1
         gen = base.generate(batch, attention_mask=attn, max_new_tokens=fudge_lookahead,
-                            do_sample=True, top_p=1.0, temperature=1.0)
+                            do_sample=True, top_p=cfg.gen_top_p, temperature=cfg.gen_temperature)
         texts = [base.decode(row) for row in gen[:, maxlen:]]
-        future = reward_fn(texts).to(device)                         # [K] in [0,1]
+        future = reward_fn(texts).to(device).view(S, K).mean(0)      # [K], averaged over S lookahead rollouts
         adjusted = top_lp + lam * future.clamp_min(1e-6).log()       # reweighted logprobs
         probs = (adjusted / max(cfg.gen_temperature, 1e-6)).softmax(-1)
         nxt = top_ids[torch.multinomial(probs, 1)].item()

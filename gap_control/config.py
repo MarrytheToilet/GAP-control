@@ -102,6 +102,10 @@ class Config:
     length_eos_scale: float = 12.0     # EOS-budget bias strength for hard length control
     decode_strength: float = 1.0       # global multiplier on the residual at decode (LM-Steer-style ε knob)
     fudge_interval: int = 3            # FUDGE baseline: run the expensive candidate-scoring every k tokens (speedup)
+    fudge_lam: float = 4.0             # FUDGE reweight strength on the future-reward estimate
+    fudge_topk: int = 20               # FUDGE candidate tokens scored per step
+    fudge_lookahead: int = 6           # FUDGE lookahead rollout length for the future estimate
+    fudge_samples: int = 1             # FUDGE lookahead rollouts averaged per candidate (variance reduction)
     entropy_gate: float = 0.0          # >0: steer more where base is uncertain (gate=(1-p_max)^? ), preserves fluency on confident tokens
     gate_gamma: float = 0.0            # projection="gate": exponent on base-uncertainty u_t in the unified budget rho_t=(rho_min+rho_max*g_t)*u_t^gamma
 
