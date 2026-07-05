@@ -126,16 +126,23 @@ Local models are read from `GAPCTRL_MODELS_DIR` (base LM, `bge-base-en-v1.5` bac
 ## Quickstart
 
 ```bash
-# fast end-to-end smoke test
-bash scripts/run_mvp.sh configs/sentiment_smoke.yaml
+# one-time: build the frozen soft-attribute classifiers (needs the API for synthesis)
+python scripts/synth_data.py       --dims sentiment,emotion,style --per-class 400
+python scripts/train_classifier.py --dim sentiment                # repeat per dimension
 
-# compositional control (cache → train → decode), with baselines
-python scripts/estimate_teacher_multi.py --config configs/compositional_demo.yaml   # 1. shared-rollout cache
-python scripts/train_compositional.py    --config configs/compositional_demo.yaml   # 2. distill controller
+# compositional control: cache once → compose any → decode → score
+python scripts/build_prefixes.py         --config configs/compositional_demo.yaml   # 1. prefixes (states s_t)
+python scripts/estimate_teacher_multi.py --config configs/compositional_demo.yaml   # 2. shared-rollout advantage cache
+python scripts/train_compositional.py    --config configs/compositional_demo.yaml   # 3. distill controller
 python scripts/decode_gap_control.py     --config configs/compositional_demo.yaml \
-       --methods gap,prompt,preadd,fudge                                            # 3. decode + baselines
-python scripts/evaluate.py               --config configs/compositional_demo.yaml   # 4. metrics table
+       --methods gap,prompt,preadd,fudge                                            # 4. decode + baselines
+python scripts/evaluate.py               --config configs/compositional_demo.yaml   # 5. metrics table
 ```
+
+The LM-Steer / CAA baselines add `python scripts/synth_pairs.py` (contrastive pairs) →
+`python scripts/compute_steering.py --pairs` before training a steering controller.
+`scripts/run_multimodel.sh` and `scripts/run_qwen.sh` drive the full multi-model suite
+end to end; `scripts/judge_*.py` run the LLM-judge corroboration.
 
 ## Repository layout
 
@@ -151,7 +158,13 @@ gap_control/         core library
   rewards.py           wires classifiers / verifiers / judge into R_c
   synth.py judge.py    LLM-API synthetic data generation + judge filtering
   base_lm.py metrics.py config.py env.py
-scripts/             pipeline CLIs (cache · train · decode · evaluate · synth)
+scripts/             pipeline CLIs
+  synth_data.py synth_pairs.py synth_prompts.py train_classifier.py   data + frozen classifiers
+  build_prefixes.py estimate_teacher_multi.py                         prefixes → shared-rollout cache
+  compute_steering.py train_compositional.py                          controller (+ LM-Steer / CAA baselines)
+  decode_gap_control.py evaluate.py score_all.py score_cd.py          decode · score
+  judge_{eval,comp,matrix}.py                                         LLM-judge corroboration
+  run_{multimodel,qwen,figdata}.sh                                    multi-model suite + figure data
 configs/             experiment configs
 data/                small canonical inputs (prompts, rewards); large rollouts gitignored
 ```
