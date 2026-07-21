@@ -4,7 +4,7 @@
 
 ### Composition as Supervision — Amortized Multi-Attribute Control via Shared-Rollout Advantage Distillation
 
-<img src="assets/framework.png" alt="GAP-Control: cache once, compose in supervision, amortize online" width="100%">
+<img src="assets/pr.png" alt="GAP-Control overview: train once, control any signed composition at ~1.2x base cost" width="720">
 
 *One offline rollout pass caches every attribute's token-level advantage. Any signed mixture is then an exact linear combination **of the training targets**, distilled into a single-pass controller that decodes at ≈1.2× base cost.*
 
@@ -37,6 +37,10 @@ so one shared-rollout pass per prefix caches the per-attribute advantages $\{\ha
 ---
 
 ## Method: three stages
+
+<div align="center">
+<img src="assets/framework.png" width="100%" alt="GAP-Control architecture: cache once, compose in supervision, amortize online">
+</div>
 
 **1 · Cache once** *(offline)* — From each prefix, one shared rollout set ($n$ continuations per top-$K$ candidate) scores *every* atomic reward on the *same* continuations:
 
@@ -201,15 +205,4 @@ scripts/             pipeline CLIs
 configs/             experiment configs (flc_* Falcon, gem_* SmolLM2, fyelp_* CompMCTG, _* sweeps)
 data/                small canonical inputs (prompts, rewards); large rollouts gitignored
 paper/scripts/       figure generators (figstyle.py = shared palette)
-```
-
-## Citation
-
-```bibtex
-@inproceedings{gapcontrol,
-  title     = {Composition as Supervision: Amortized Multi-Attribute Control
-               via Shared-Rollout Advantage Distillation},
-  author    = {Anonymous},
-  year      = {2027}
-}
 ```
