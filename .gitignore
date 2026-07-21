@@ -36,3 +36,9 @@ paper/
 .claude/settings.local.json
 .DS_Store
 *.swp
+
+# --- third-party benchmarks (data + 17GB official evaluator checkpoints) ---
+third_party/
+
+# --- data converted from third_party (regenerate via scripts/compmctg_prep.py) ---
+data/compmctg/

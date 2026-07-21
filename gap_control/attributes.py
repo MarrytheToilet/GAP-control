@@ -13,6 +13,7 @@ all the *same* code path.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -22,11 +23,45 @@ from . import verifiers
 
 
 # ----------------------- canonical taxonomy -----------------------
-SOFT_DIMS = {
-    "sentiment": ["positive", "negative", "neutral"],
-    "emotion": ["joy", "anger", "sadness", "fear"],
-    "style": ["formal", "informal", "literary"],
+# Attribute-set presets. Select with GAPCTRL_ATTRS (default = the paper's library);
+# CompMCTG presets mirror the benchmark's aspects (Zhong et al. 2024), lowercased.
+_ATTR_PRESETS = {
+    "default": {
+        "soft": {
+            "sentiment": ["positive", "negative", "neutral"],
+            "emotion": ["joy", "anger", "sadness", "fear"],
+            "style": ["formal", "informal", "literary"],
+        },
+        "intensity": {"sentiment": ("negative", "positive"),
+                      "style": ("informal", "formal")},
+    },
+    "yelp": {  # CompMCTG-Yelp: 3 aspects, 8 combinations
+        "soft": {
+            "sentiment": ["positive", "negative"],
+            "pronoun": ["singular", "plural"],
+            "tense": ["present", "past"],
+        },
+        "intensity": {"sentiment": ("negative", "positive")},
+    },
+    "fyelp": {  # CompMCTG-Fyelp: 4 aspects, 40 combinations
+        "soft": {
+            "sentiment": ["positive", "negative"],
+            "gender": ["male", "female"],
+            "cuisine": ["asian", "american", "mexican", "bar", "dessert"],
+            "tense": ["present", "past"],
+        },
+        "intensity": {"sentiment": ("negative", "positive")},
+    },
+    "amazon": {  # CompMCTG-Amazon: 2 aspects, 12 combinations
+        "soft": {
+            "sentiment": ["positive", "negative"],
+            "topic": ["books", "clothing", "music", "electronics", "movies", "sports"],
+        },
+        "intensity": {"sentiment": ("negative", "positive")},
+    },
 }
+ATTR_SET = os.environ.get("GAPCTRL_ATTRS", "default")
+SOFT_DIMS = _ATTR_PRESETS[ATTR_SET]["soft"]
 HARD_CATEGORICAL = {
     "length": ["short", "medium", "long"],
     "structure": ["interrogative", "exclamatory", "enumeration", "dialogue"],
@@ -35,10 +70,7 @@ HARD_CATEGORICAL = {
 PARAMETRIC_DIMS = ["keyword"]
 
 # continuous-intensity axes (handbook 3.2 group B): (dim, low_class, high_class)
-INTENSITY_AXES = {
-    "sentiment": ("negative", "positive"),
-    "style": ("informal", "formal"),
-}
+INTENSITY_AXES = _ATTR_PRESETS[ATTR_SET]["intensity"]
 
 
 def _build_slots():

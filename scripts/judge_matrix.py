@@ -7,7 +7,7 @@ import json, re
 from concurrent.futures import ThreadPoolExecutor
 from gap_control.env import get_client
 
-JUDGES = ["glm-5.2", "kimi-k2.6", "deepseek-v4-flash"]
+JUDGES = ["kimi-k2.6", "deepseek-v4-flash", "MiniMax-M2.5"]
 ATTRS = {"single": ["positive sentiment"],
          "unseen": ["positive sentiment", "formal style"],
          "triple": ["positive sentiment", "formal style", "joyful emotion"]}
@@ -45,33 +45,46 @@ def load(fname, mfilter):
     return rows
 
 
-def judge_one(model, attrs, prompt, text):
+RAW_LOG = open("outputs/judge_matrix_raw.jsonl", "a")
+THRESH = 3
+
+
+def judge_one(model, attrs, prompt, text, meta=None):
     lines = "\n".join(f"{i+1}) {a}" for i, a in enumerate(attrs))
     keys = ",".join(f'"{i+1}":x' for i in range(len(attrs)))
     msg = (f"Prompt: {prompt!r}\nText: {text!r}\n\nRate the TEXT on each attribute, integer 1-5 "
            f"(5 = strongly exhibits it):\n{lines}\nReply ONLY as JSON: {{{keys}}}.")
-    extra = {"thinking": {"type": "disabled"}} if model.startswith("glm") else {}
+    extra = ({"thinking": {"type": "disabled"}}
+             if model.startswith(("glm", "deepseek")) else {})
     try:
         r = get_client().chat.completions.create(model=model, temperature=0.0, max_tokens=60,
               extra_body=extra, messages=[{"role": "user", "content": msg}])
         v = {int(k): int(val) for k, val in re.findall(r'"(\d+)"\s*:\s*([1-5])', r.choices[0].message.content or "")}
         if len(v) == len(attrs):
-            return all(v[i+1] >= 3 for i in range(len(attrs)))
+            ratings = [v[i + 1] for i in range(len(attrs))]
+            if meta is not None:
+                RAW_LOG.write(json.dumps({**meta, "judge": model, "attrs": attrs,
+                                          "ratings": ratings}) + "\n")
+            return all(x >= THRESH for x in ratings)
     except Exception:
         pass
     return None
 
 
-def cell_value(fname, mfilter, attrs):
+def cell_value(fname, mfilter, attrs, meta=None):
     rows = load(fname, mfilter)
     if not rows:
         return None
     per_judge = []
     for j in JUDGES:
         with ThreadPoolExecutor(max_workers=8) as ex:
-            v = [x for x in ex.map(lambda pt: judge_one(j, attrs, pt[0], pt[1]), rows) if x is not None]
+            v = [x for x in ex.map(
+                lambda it: judge_one(j, attrs, it[1][0], it[1][1],
+                                     None if meta is None else {**meta, "i": it[0]}),
+                enumerate(rows)) if x is not None]
         if v:
             per_judge.append(sum(v) / len(v))
+        RAW_LOG.flush()
     return sum(per_judge) / len(per_judge) if per_judge else None
 
 
@@ -81,6 +94,7 @@ for model, method, settings in CELLS:
     out = {}
     for s in ("single", "unseen", "triple"):
         fname, mf = settings[s]
-        out[s] = cell_value(fname, mf, ATTRS[s])
+        out[s] = cell_value(fname, mf, ATTRS[s],
+                            meta={"model": model, "method": method, "setting": s})
     fmt = lambda x: f"{x:.2f}" if x is not None else "--"
     print(f"{model:8} {method:10} {fmt(out['single']):>11} {fmt(out['unseen']):>11} {fmt(out['triple']):>11}", flush=True)
